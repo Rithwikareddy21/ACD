@@ -1,0 +1,112 @@
+Lexical_analyzer.l
+%{
+#include <stdio.h> #include <stdlib.h>
+
+int COMMENT = 0;
+%}
+
+identifier [a-zA-Z_][a-zA-Z0-9_]* number [0-9]+
+
+%%
+"#".*	{ printf("\n%s is a PREPROCESSOR DIRECTIVE", yytext); }
+
+"int"|"float"|"char"|"double"|"while"|"for"|"struct"|"typedef"|"do"|"if"|"break"| "continue"|"void"|"switch"|"return"|"else"|"goto"
+{ if(!COMMENT) printf("\n%s is a KEYWORD", yytext); }
+
+"/*"	{ COMMENT = 1; printf("\n%s begins a COMMENT", yytext); }
+"*/"	{ COMMENT = 0; printf("\n%s ends a COMMENT", yytext); }
+{identifier}\(		{ if(!COMMENT) printf("\nFUNCTION: %s", yytext); } "{"	{ if(!COMMENT) printf("\nBLOCK BEGINS"); }
+"}"	{ if(!COMMENT) printf("\nBLOCK ENDS"); }
+
+{identifier}(\[[0-9]*\])?	{ if(!COMMENT) printf("\n%s is an IDENTIFIER", yytext); }
+
+\".*\"	{ if(!COMMENT) printf("\n%s is a STRING", yytext); }
+
+{number}	{ if(!COMMENT) printf("\n%s is a NUMBER", yytext); }
+
+"="	{ if(!COMMENT) printf("\n%s is an ASSIGNMENT OPERATOR", yytext);
+}
+
+"<="|">="|"<"|"=="|">"	{ if(!COMMENT) printf("\n%s is a RELATIONAL OPERATOR",
+yytext); }
+
+[ \t\n]+	; /* Ignore whitespace */
+.	{ if(!COMMENT) printf("\nUNKNOWN TOKEN: %s", yytext); }
+
+%%
+ 
+int main(int argc, char **argv) { FILE *file = fopen("var.c", "r"); if (!file) {
+printf("Could not open the file.\n"); exit(0);
+}
+yyin = file; yylex();
+printf("\n"); return 0;
+}
+
+int yywrap() { return 1;
+}
+
+Var.c #include<stdio.h> #include<conio.h>
+
+void main() { int a, b, c;
+a = 1;
+b = 2;
+c = a + b;
+printf("Sum: %d", c);
+}
+ 
+YAAC program:
+Calc.l
+%{
+#include <stdio.h> #include <stdlib.h> #include "y.tab.h" extern int yylval;
+%}
+
+%%
+[0-9]+		{ yylval = atoi(yytext); return NUMBER; } [ \t]+	{ /* ignore spaces */ }
+\n	{ return 0; }
+.	{ return yytext[0]; }
+%%
+
+int yywrap(void) { return 1; }
+
+parse.y
+%{
+#include <stdio.h> int flag = 0;
+int yylex(void);
+void yyerror(const char *s);
+%}
+
+%token NUMBER
+%left '+' '-'
+%left '*' '/' '%'
+%left '(' ')'
+
+%%
+ArithmeticExpression
+: E { printf("Result = %d\n", $$); return 0; }
+;
+
+E  : E '+' E  { $$ = $1 + $3; }
+| E '-' E  { $$ = $1 - $3; }
+| E '*' E  { $$ = $1 * $3; }
+| E '/' E  { $$ = $1 / $3; }
+| E '%' E { $$ = $1 % $3; }
+| '(' E ')' { $$ = $2; }
+| NUMBER	{ $$ = $1; }
+ 
+;
+%%
+
+int main(void) {
+printf("Enter any arithmetic expression (+, -, *, /, %% and parentheses):\n"); yyparse();
+if (flag == 0)
+printf("Entered arithmetic expression is Valid\n"); return 0;
+}
+
+void yyerror(const char *s) { (void)s;
+printf("Entered arithmetic expression is Invalid\n"); flag = 1;
+}
+
+Compile and run:
+yacc -d parse.y lex calc.l
+gcc lex.yy.c y.tab.c -w
+./a.out
