@@ -1,5 +1,9 @@
-#include <stdio.h> #include <ctype.h> #include <string.h> #define MAX_ID_LEN 31
-#define MAX_TOKENS 500 const char *keywords[] = {
+#include <stdio.h>
+ #include <ctype.h>
+  #include <string.h> 
+  #define MAX_ID_LEN 31
+#define MAX_TOKENS 500 
+const char *keywords[] = {
 "auto","break","case","char","const","continue","default","do",
 "double","else","enum","extern","float","for","goto","if",
 "int","long","register","return","short","signed","sizeof","static",

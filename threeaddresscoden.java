@@ -1,7 +1,7 @@
 import java.util.*;
 import java.util.regex.*;
 
-public class Main {
+public class threeaddresscoden {
 
     // Step 1: Tokenize expression
     public static List<String> tokenize(String expr) {
