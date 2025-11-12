@@ -1,162 +1,255 @@
-import ply.lex as lex
-import ply.yacc as yacc
-from graphviz import Digraph
+#include <stdio.h>
+#include <ctype.h>
+#include <string.h>
 
-# ---------------- Lexer ----------------
-tokens = ('NUMBER',)
-literals = ['+', '-', '*', '/', '(', ')']
-t_ignore = ' \t\n'
+#define MAX_ID_LEN 31
+#define MAX_TOKENS 500
 
+const char *keywords[] = {
+    "auto", "break", "case", "char", "const", "continue", "default",
+    "do", "double", "else", "enum", "extern", "float", "for",
+    "goto", "if", "int", "long", "register", "return", "short",
+    "signed", "sizeof", "static", "struct", "switch", "typedef",
+    "union", "unsigned", "void", "volatile", "while"
+};
+int keywordCount = sizeof(keywords) / sizeof(keywords[0]);
 
-def t_NUMBER(t):
-    r'\d+'
-    t.value = int(t.value)
-    return t
+const char *operators[] = {
+    "+", "-", "*", "/", "%", "=", "==", "!=", "<", ">", "<=", ">=",
+    "++", "--", "&&", "||", "!", "+=", "-=", "*=", "/="
+};
+int operatorCount = sizeof(operators) / sizeof(operators[0]);
 
+const char *delimiters[] = { ";", ",", "(", ")", "{", "}", "[", "]" };
+int delimiterCount = sizeof(delimiters) / sizeof(delimiters[0]);
 
-def t_error(t):
-    print(f"Illegal character '{t.value[0]}'")
-    t.lexer.skip(1)
+const char *specialSymbols[] = { "#", "\"", "'", "\\", ".", ":", "?" };
+int specialCount = sizeof(specialSymbols) / sizeof(specialSymbols[0]);
 
+char keywordsFound[MAX_TOKENS][MAX_ID_LEN];
+int kwIndex = 0;
 
-lexer = lex.lex()
+char identifiersFound[MAX_TOKENS][MAX_ID_LEN];
+int idIndex = 0;
 
+char numbersFound[MAX_TOKENS][64];
+int numIndex = 0;
 
-# ---------------- AST Nodes ----------------
-class ASTNode:
-    pass
+char operatorsFound[MAX_TOKENS][4];
+int opIndex = 0;
 
+char delimitersFound[MAX_TOKENS][4];
+int delIndex = 0;
 
-class BinOp(ASTNode):
-    def __init__(self, left, op, right):
-        self.left = left
-        self.op = op
-        self.right = right
+char specialsFound[MAX_TOKENS][4];
+int spIndex = 0;
 
-    def __repr__(self):
-        return f"({self.left} {self.op} {self.right})"
+char stringsFound[MAX_TOKENS][256];
+int strIndex = 0;
 
-
-class Num(ASTNode):
-    def __init__(self, value):
-        self.value = value
-
-    def __repr__(self):
-        return str(self.value)
-
-
-# ---------------- Convert BNF to YACC rules ----------------
-def bnf_to_yacc(bnf_grammar):
-    rules = {}
-    for line in bnf_grammar.splitlines():
-        if '::=' not in line:
-            continue
-        left, right = line.split('::=')
-        rules[left.strip()] = right.strip()
-    return rules
+char charsFound[MAX_TOKENS][4];
+int chIndex = 0;
 
 
-# ---------------- Parser ----------------
-def generate_parser(yacc_rules):
-    def p_expr(p):
-        '''expr : expr '+' term
-                | expr '-' term
-                | term'''
-        if len(p) == 4:
-            p[0] = BinOp(p[1], p[2], p[3])
-        else:
-            p[0] = p[1]
+// ---------------- Utility functions ----------------
 
-    def p_term(p):
-        '''term : term '*' factor
-                | term '/' factor
-                | factor'''
-        if len(p) == 4:
-            p[0] = BinOp(p[1], p[2], p[3])
-        else:
-            p[0] = p[1]
+int isKeyword(const char *str) {
+    for (int i = 0; i < keywordCount; i++) {
+        if (strcmp(str, keywords[i]) == 0)
+            return 1;
+    }
+    return 0;
+}
 
-    def p_factor(p):
-        '''factor : '(' expr ')'
-                  | NUMBER'''
-        if len(p) == 4:
-            p[0] = p[2]
-        else:
-            p[0] = Num(p[1])
+int isOperator(const char *str) {
+    for (int i = 0; i < operatorCount; i++) {
+        if (strcmp(str, operators[i]) == 0)
+            return 1;
+    }
+    return 0;
+}
 
-    def p_error(p):
-        print("Syntax error!")
+int isDelimiter(char c) {
+    for (int i = 0; i < delimiterCount; i++) {
+        if (c == delimiters[i][0])
+            return 1;
+    }
+    return 0;
+}
 
-    return yacc.yacc()
-
-
-# ---------------- AST to GraphViz ----------------
-def ast_to_graph(node, graph=None, counter=[0]):
-    if graph is None:
-        graph = Digraph()
-        graph.attr('node', shape='circle')
-
-    counter[0] += 1
-    node_id = str(counter[0])
-
-    if isinstance(node, BinOp):
-        graph.node(node_id, node.op)
-        left_id = ast_to_graph(node.left, graph, counter)
-        right_id = ast_to_graph(node.right, graph, counter)
-        graph.edge(node_id, left_id)
-        graph.edge(node_id, right_id)
-
-    elif isinstance(node, Num):
-        graph.node(node_id, str(node.value))
-
-    else:
-        graph.node(node_id, "?")
-
-    return node_id
+int isSpecial(char c) {
+    for (int i = 0; i < specialCount; i++) {
+        if (c == specialSymbols[i][0])
+            return 1;
+    }
+    return 0;
+}
 
 
-# ---------------- Main Program ----------------
-def main():
-    print("Enter your BNF grammar (end with an empty line):")
-    lines = []
-    while True:
-        line = input()
-        if line.strip() == '':
-            break
-        lines.append(line)
+// ---------------- Skip whitespace & comments ----------------
 
-    bnf_grammar = '\n'.join(lines)
+void skipWhitespaceAndComments(FILE *fp) {
+    int c;
+    while ((c = fgetc(fp)) != EOF) {
+        if (isspace(c))
+            continue;
 
-    # Step 1: Convert BNF to YACC dictionary
-    yacc_rules = bnf_to_yacc(bnf_grammar)
-
-    print("\nConverted YACC rules:")
-    for k, v in yacc_rules.items():
-        print(f"{k} -> {v}")
-
-    # Step 2: Build parser
-    parser = generate_parser(yacc_rules)
-
-    # Step 3: Interactive expression input
-    print("\nEnter arithmetic expressions (type 'exit' to quit):")
-    while True:
-        try:
-            expr_input = input(">>> ")
-            if expr_input.lower() == 'exit':
-                break
-
-            result = parser.parse(expr_input)
-            print("AST:", result)
-
-            # Step 4: Generate AST diagram
-            dot = Digraph()
-            ast_to_graph(result, dot)
-            dot.render('ast_tree', format='png', cleanup=True)
-            print("AST diagram saved as ast_tree.png")
-
-        except Exception as e:
-            print("Error:", e)
+        if (c == '/') {
+            int next = fgetc(fp);
+            if (next == '/') {
+                while ((c = fgetc(fp)) != '\n' && c != EOF);
+            } else if (next == '*') {
+                while ((c = fgetc(fp)) != EOF) {
+                    if (c == '*' && (c = fgetc(fp)) == '/')
+                        break;
+                }
+            } else {
+                ungetc(next, fp);
+                ungetc(c, fp);
+                return;
+            }
+        } else {
+            ungetc(c, fp);
+            return;
+        }
+    }
+}
 
 
-if __name__ == "__main__":
-    main()
+// ---------------- Token extraction ----------------
+
+void getToken(FILE *fp) {
+    int c;
+    skipWhitespaceAndComments(fp);
+    c = fgetc(fp);
+    if (c == EOF) return;
+
+    // Identifier or keyword
+    if (isalpha(c) || c == '_') {
+        char buffer[MAX_ID_LEN + 1];
+        int i = 0;
+        buffer[i++] = c;
+        while ((c = fgetc(fp)) != EOF && (isalnum(c) || c == '_')) {
+            if (i < MAX_ID_LEN)
+                buffer[i++] = c;
+        }
+        buffer[i] = '\0';
+        ungetc(c, fp);
+
+        if (isKeyword(buffer))
+            strcpy(keywordsFound[kwIndex++], buffer);
+        else
+            strcpy(identifiersFound[idIndex++], buffer);
+    }
+
+    // Number
+    else if (isdigit(c)) {
+        char buffer[64];
+        int i = 0;
+        buffer[i++] = c;
+        while ((c = fgetc(fp)) != EOF && (isdigit(c) || c == '.')) {
+            buffer[i++] = c;
+        }
+        buffer[i] = '\0';
+        ungetc(c, fp);
+        strcpy(numbersFound[numIndex++], buffer);
+    }
+
+    // String literal
+    else if (c == '"') {
+        char buffer[256];
+        int i = 0;
+        while ((c = fgetc(fp)) != EOF && c != '"') {
+            buffer[i++] = c;
+        }
+        buffer[i] = '\0';
+        strcpy(stringsFound[strIndex++], buffer);
+    }
+
+    // Character literal
+    else if (c == '\'') {
+        char ch = fgetc(fp);
+        fgetc(fp); // skip closing quote
+        charsFound[chIndex][0] = ch;
+        charsFound[chIndex][1] = '\0';
+        chIndex++;
+    }
+
+    // Delimiters
+    else if (isDelimiter(c)) {
+        char d[2] = { c, '\0' };
+        strcpy(delimitersFound[delIndex++], d);
+    }
+
+    // Special symbols
+    else if (isSpecial(c)) {
+        char s[2] = { c, '\0' };
+        strcpy(specialsFound[spIndex++], s);
+    }
+
+    // Operators
+    else {
+        char op[3] = { c, '\0', '\0' };
+        int next = fgetc(fp);
+        if (next != EOF) {
+            op[1] = next;
+            if (!isOperator(op)) {
+                op[1] = '\0';
+                ungetc(next, fp);
+            }
+        }
+        if (isOperator(op))
+            strcpy(operatorsFound[opIndex++], op);
+    }
+}
+
+
+// ---------------- Main ----------------
+
+int main() {
+    FILE *fp = fopen("input.c", "r");
+    if (!fp) {
+        printf("Could not open file.\n");
+        return 1;
+    }
+
+    while (!feof(fp)) {
+        getToken(fp);
+    }
+
+    fclose(fp);
+
+    printf("\nKeywords:\n");
+    for (int i = 0; i < kwIndex; i++)
+        printf("%s\n", keywordsFound[i]);
+
+    printf("\nIdentifiers:\n");
+    for (int i = 0; i < idIndex; i++)
+        printf("%s\n", identifiersFound[i]);
+
+    printf("\nNumbers:\n");
+    for (int i = 0; i < numIndex; i++)
+        printf("%s\n", numbersFound[i]);
+
+    printf("\nStrings:\n");
+    for (int i = 0; i < strIndex; i++)
+        printf("\"%s\"\n", stringsFound[i]);
+
+    printf("\nChars:\n");
+    for (int i = 0; i < chIndex; i++)
+        printf("'%s'\n", charsFound[i]);
+
+    printf("\nOperators:\n");
+    for (int i = 0; i < opIndex; i++)
+        printf("%s\n", operatorsFound[i]);
+
+    printf("\nDelimiters:\n");
+    for (int i = 0; i < delIndex; i++)
+        printf("%s\n", delimitersFound[i]);
+
+    printf("\nSpecial Symbols:\n");
+    for (int i = 0; i < spIndex; i++)
+        printf("%s\n", specialsFound[i]);
+
+    return 0;
+}
